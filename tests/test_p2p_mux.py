@@ -8,10 +8,9 @@ import hashlib
 import os
 import struct
 
+from nvrizleme.p2p import MuxPtcp, P2PSession, RawBody  # önce: yamayı kurar
 from opendahua.object.address import Address
 from opendahua.udp.udp_socket import UdpSocket
-
-from nvrizleme.p2p import MuxPtcp, P2PSession, RawBody
 
 USER, PASSWORD, REALM, NONCE = "admin", "s@fre#1:x", "Login to TEST", "abc123"
 BODY = "table.ChannelTitle[0].Name=Kapi\r\ntable.ChannelTitle[1].Name=Otopark\r\n"

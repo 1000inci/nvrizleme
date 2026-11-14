@@ -20,6 +20,7 @@ import random
 import struct
 from typing import Callable
 
+from . import _compat  # noqa: F401  (opendahua'yı Python < 3.14'te çalıştırır)
 from opendahua.common_object.dahua_error import DahuaError
 from opendahua.dahua.dahua_device import DahuaDevice
 from opendahua.dahua.dahua_peer_to_peer_connection_error import (
