@@ -224,21 +224,41 @@ class P2PSession:
         """Şifreyle kimlik doğrular, UDP delik açma ile tüneli kurar."""
         if self._salt is None:
             await self.check_online()
-        self.log("P2P tüneli kuruluyor (UDP delik açma)...")
-        try:
-            base = await self._signaling.determine_ptcp_socket_device(self._salt)
-        except DahuaPeerToPeerConnectionError:
+        sig = self._signaling
+        base = None
+        for attempt in range(1, 4):
+            self.log(f"Kanal isteği gönderiliyor (deneme {attempt}/3)...")
+            try:
+                udp, local = await sig._determine_udp_socket_device(self._salt)
+            except DahuaError as e:
+                raise P2PError(
+                    "P2P kanalı açılamadı. Kullanıcı adı / şifre hatalı "
+                    f"olabilir; tekrar denemeden önce kontrol edin. ({e})")
+            except (asyncio.TimeoutError, TimeoutError):
+                raise P2PError(
+                    "Sunucu kanal isteğine yanıt vermedi (cihaz sunucuya "
+                    "yanıt vermiyor olabilir). Biraz sonra tekrar deneyin.")
+            self.log("Kanal açıldı (şifre kabul edildi). Cihaz adresi: "
+                     f"dış {udp.get_address_remote().get_address_string()}, "
+                     f"iç {local.get_address_string()}")
+            self.log("Cihaza doğrudan UDP bağlantısı deneniyor...")
+            try:
+                base = await sig._determine_ptcp_socket_device(udp, local)
+                break
+            except DahuaPeerToPeerConnectionError:
+                self.log("Cihazdan hiç yanıt gelmedi.")
+                udp.close()
+            except (asyncio.TimeoutError, TimeoutError):
+                self.log("Cihazdan ilk yanıt GELDİ ama el sıkışma yarıda kaldı.")
+                udp.close()
+            if attempt < 3:
+                await asyncio.sleep(3)
+        if base is None:
             raise P2PError(
-                "Cihazla doğrudan UDP bağlantısı kurulamadı. Bu genelde "
-                "taraflardan birinin 'simetrik NAT' (ör. mobil hat / CGNAT) "
-                "arkasında olması demektir; bu durumda aktarma (relay) modu "
-                "gerekir ve henüz desteklenmiyor.")
-        except DahuaError as e:
-            raise P2PError(
-                "P2P kanalı açılamadı. Kullanıcı adı / şifre hatalı olabilir. "
-                f"(Sunucu yanıtı: {e})")
-        except (asyncio.TimeoutError, TimeoutError):
-            raise P2PError("P2P kanal isteği zaman aşımına uğradı.")
+                "Cihazla doğrudan UDP bağlantısı kurulamadı. Yukarıdaki "
+                "satırlar hangi aşamada kalındığını gösterir. 'Hiç yanıt "
+                "gelmedi' ise arada bağlantıyı engelleyen bir güvenlik "
+                "duvarı / NAT vardır.")
         self.ptcp = MuxPtcp(base._udp_socket, self.log)
         await self.ptcp.connect()
         self.log("P2P tüneli kuruldu.")
