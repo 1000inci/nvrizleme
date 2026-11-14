@@ -22,6 +22,9 @@ import struct
 from typing import Callable
 
 from . import _compat  # noqa: F401  (opendahua'yı Python < 3.14'te çalıştırır)
+from opendahua.api_peer_to_peer.request.api_peer_to_peer_encryption_util import (
+    ApiPeerToPeerEncryptionUtil,
+)
 from opendahua.common_object.dahua_error import DahuaError
 from opendahua.dahua.dahua_device import DahuaDevice
 from opendahua.dahua.dahua_peer_to_peer_connection_error import (
@@ -87,6 +90,23 @@ def _tolerant_error_received(self, exc: Exception) -> None:
 
 
 UdpProtocol.error_received = _tolerant_error_received
+
+
+# Cihaz bilgisi (HTTP/RTSP portları dahil) OpenDahua içinde çözülüyor ama
+# yalnızca "randsalt" saklanıyor. Portlar varsayılan olmayabildiği için
+# (ör. HTTP 7980, RTSP 7982) çözülen bilginin tamamını da yakalıyoruz.
+_last_device_info: dict = {}
+_original_decrypt_info = ApiPeerToPeerEncryptionUtil.decrypt_device_info.__func__
+
+
+def _capturing_decrypt_info(cls, device_info_encrypted: str) -> dict:
+    info = _original_decrypt_info(cls, device_info_encrypted)
+    _last_device_info.clear()
+    _last_device_info.update(info)
+    return info
+
+
+ApiPeerToPeerEncryptionUtil.decrypt_device_info = classmethod(_capturing_decrypt_info)
 
 
 def _realm_of(raw: bytes) -> int | None:
@@ -200,6 +220,8 @@ class P2PSession:
         self._signaling = SignalingClient(self._device)
         self._salt = None
         self.ptcp: MuxPtcp | None = None
+        self.http_port = 80      # check_online cihazın bildirdiği değerle günceller
+        self.rtsp_port = 554
         self._servers: list[asyncio.AbstractServer] = []
 
     # --- bağlantı adımları ----------------------------------------------
@@ -235,6 +257,13 @@ class P2PSession:
                 f"olduğunu kontrol edin. (Sunucu yanıtı: {e})")
         finally:
             main.close()
+        try:
+            self.http_port = int(_last_device_info.get("httpport") or 80)
+            self.rtsp_port = int(_last_device_info.get("rtspport") or 554)
+        except (TypeError, ValueError):
+            pass
+        self.log(f"Cihazın bildirdiği portlar: HTTP {self.http_port}, "
+                 f"RTSP {self.rtsp_port}")
 
     async def open_tunnel(self) -> None:
         """Şifreyle kimlik doğrular, UDP delik açma ile tüneli kurar."""
@@ -289,7 +318,7 @@ class P2PSession:
     # --- tünel üzerinden HTTP -------------------------------------------
     async def _http_once(self, path: str, auth: str | None) -> tuple[int, dict, bytes]:
         assert self.ptcp is not None
-        rid = self.ptcp.open_realm(80)
+        rid = self.ptcp.open_realm(self.http_port)
         try:
             req = (f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
                    f"User-Agent: NVRIzleme\r\nConnection: close\r\n")
@@ -335,9 +364,14 @@ class P2PSession:
         return status, body.decode("utf-8", "replace")
 
     # --- yerel port yönlendirme -----------------------------------------
-    async def forward(self, remote_port: int = 554, local_port: int = 0) -> int:
-        """127.0.0.1:<dönen port> -> NVR:<remote_port>. Yerel portu döndürür."""
+    async def forward(self, remote_port: int | None = None, local_port: int = 0) -> int:
+        """127.0.0.1:<dönen port> -> NVR:<remote_port>. Yerel portu döndürür.
+
+        remote_port verilmezse cihazın RTSP portu kullanılır.
+        """
         assert self.ptcp is not None
+        if remote_port is None:
+            remote_port = self.rtsp_port
         ptcp = self.ptcp
 
         async def handle(reader: asyncio.StreamReader,

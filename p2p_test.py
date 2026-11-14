@@ -86,7 +86,7 @@ def main() -> int:
                     print(f"    {ch.number:>2}: {ch.name}")
 
             step(4, "RTSP akışı (yerel port üzerinden)")
-            lport = await s.forward(554)
+            lport = await s.forward()
             log(f"Yerel RTSP portu: 127.0.0.1:{lport}")
             channel = args.izle or 1
             subtype = rtsp.MAIN if args.ana else rtsp.SUB
