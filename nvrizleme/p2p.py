@@ -53,6 +53,10 @@ class P2PError(Exception):
     pass
 
 
+class P2PAuthError(P2PError):
+    """Kanal isteği reddedildi (büyük olasılıkla şifre). Otomatik yeniden denenmemeli."""
+
+
 class RawBody(PtcpPacketBody):
     """OpenDahua'nın tanımadığı paket gövdesi (ör. durum / bind)."""
 
@@ -265,18 +269,18 @@ class P2PSession:
         self.log(f"Cihazın bildirdiği portlar: HTTP {self.http_port}, "
                  f"RTSP {self.rtsp_port}")
 
-    async def open_tunnel(self) -> None:
+    async def open_tunnel(self, attempts: int = 5) -> None:
         """Şifreyle kimlik doğrular, UDP delik açma ile tüneli kurar."""
         if self._salt is None:
             await self.check_online()
         sig = self._signaling
         base = None
-        for attempt in range(1, 4):
-            self.log(f"Kanal isteği gönderiliyor (deneme {attempt}/3)...")
+        for attempt in range(1, attempts + 1):
+            self.log(f"Kanal isteği gönderiliyor (deneme {attempt}/{attempts})...")
             try:
                 udp, local = await sig._determine_udp_socket_device(self._salt)
             except DahuaError as e:
-                raise P2PError(
+                raise P2PAuthError(
                     "P2P kanalı açılamadı. Kullanıcı adı / şifre hatalı "
                     f"olabilir; tekrar denemeden önce kontrol edin. ({e})")
             except (asyncio.TimeoutError, TimeoutError):
@@ -296,7 +300,7 @@ class P2PSession:
             except (asyncio.TimeoutError, TimeoutError):
                 self.log("Cihazdan ilk yanıt GELDİ ama el sıkışma yarıda kaldı.")
                 udp.close()
-            if attempt < 3:
+            if attempt < attempts:
                 await asyncio.sleep(3)
         if base is None:
             raise P2PError(

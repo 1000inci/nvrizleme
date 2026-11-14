@@ -2,8 +2,22 @@
 
 Dahua NVR'lar için Windows izleme programı. Öncelik: **P2P (seri numarası) ile bağlantı**.
 
-> Durum: geliştirme aşamasında. Şu an yalnızca P2P bağlantı testi aracı var;
-> izleme arayüzü sonraki adım.
+> Durum: geliştirme aşamasında. P2P bağlantısı gerçek cihazda doğrulandı;
+> izleme arayüzü ilk sürümünde.
+
+## İzleme programı
+
+```
+python izle.py
+```
+
+- **Cihaz Ekle**: P2P (seri no) ya da IP adresiyle cihaz tanımlanır.
+- Cihaza **çift tık**: bağlanır ve kanallarını ızgarada gösterir.
+- Kanala **çift tık**: kanalı seçili karoya yerleştirir.
+- Karoya **çift tık**: tek kanala büyütür (ana akış); tekrar çift tık geri döner.
+- **Ekran**: 1/4/9/16/25/36 karo; **Önceki/Sonraki** ile sayfa değişir.
+
+Görüntü için 64 bit VLC kurulu olmalıdır.
 
 ## Nasıl çalışır
 
@@ -47,14 +61,19 @@ Adımlar: (1) cihaz P2P sunucusunda mı → (2) tünel → (3) model ve kanal li
 
 - Simetrik NAT / CGNAT (ör. mobil internet) arkasında doğrudan bağlantı
   kurulamaz; aktarma (relay) modu henüz yok.
-- Gerçek cihazla henüz doğrulanmadı; `tests/` yalnızca sahte cihazla
-  tünel çoklama mantığını sınar.
+- Bazı modeller (ör. NVR616) kanal adlarını vermez; kanal sayısı cihaz
+  ayarından alınır.
 
 ## Dosyalar
 
 | Dosya | İş |
 |---|---|
+| `izle.py` | İzleme programı |
 | `p2p_test.py` | Adım adım P2P bağlantı testi |
+| `ip_test.py` | Doğrudan IP bağlantı testi |
+| `nvrizleme/app.py` | Ana pencere, görüntü ızgarası |
+| `nvrizleme/links.py` | Arka planda bağlantı yönetimi, yeniden bağlanma |
+| `nvrizleme/store.py` | Cihaz listesi ve şifre saklama |
 | `nvrizleme/p2p.py` | P2P tüneli, tünel HTTP'si, yerel port yönlendirme |
 | `nvrizleme/rtsp.py` | RTSP adresleri ve görüntüsüz RTSP testi |
 | `nvrizleme/dahua.py` | NVR HTTP API (yerel ağ / IP bağlantısı için) |

@@ -128,9 +128,13 @@ def main() -> int:
     # Windows'un varsayılan (Proactor) döngüsü UDP'de sorunlu; Selector kullan.
     loop = (asyncio.SelectorEventLoop() if sys.platform == "win32"
             else asyncio.new_event_loop())
+    task = loop.create_task(run())
     try:
-        return loop.run_until_complete(run())
+        return loop.run_until_complete(task)
     except KeyboardInterrupt:
+        # Tüneli düzgün kapat: görevi iptal et ve temizliğin bitmesini bekle.
+        task.cancel()
+        loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
         print("\nKapatıldı.")
         return 0
     finally:
