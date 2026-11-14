@@ -16,6 +16,7 @@ Resmi bir Dahua arayüzü değildir; protokol belgesizdir.
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import socket
 import struct
@@ -151,10 +152,52 @@ class MuxPtcp(PtcpSocket):
         self.on_control: Callable[[bytes], None] | None = None
         self.last_rx = 0.0
 
+    # --- döngüleri sağlamlaştırma ---------------------------------------
+    # OpenDahua'da bu döngülerden biri istisna alırsa sessizce ölür; örneğin
+    # gönderim döngüsü ölürse eski akışlar sürer ama yenisi hiç açılamaz.
+    # Burada istisna günlüğe yazılır ve döngü çalışmaya devam eder.
+    async def _guard(self, name: str, step) -> None:
+        while True:
+            try:
+                await step()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._log(f"[PTCP] {name} hatası (devam ediliyor): {e!r}")
+                await asyncio.sleep(0.05)
+
+    async def _loop_send(self) -> None:
+        async def step() -> None:
+            body = await self._queue_send.get()
+            self._send_packet_body(body)
+        await self._guard("gönderim", step)
+
+    async def _loop_receive(self) -> None:
+        async def step() -> None:
+            self._handle_receive(await self._udp_socket.receive())
+        await self._guard("alım", step)
+
+    async def _loop_retransmit(self) -> None:
+        async def step() -> None:
+            await asyncio.sleep(self.TIMEOUT_NUMBER_OF_SECOND_ACK)
+            self._handle_retransmit()
+        await self._guard("yeniden gönderim", step)
+
+    async def _loop_heartbeat(self) -> None:
+        async def step() -> None:
+            await asyncio.sleep(self.INTERVAL_NUMBER_OF_SECOND_HEARTBEAT)
+            self._send_heartbeat()
+        await self._guard("kalp atışı", step)
+
+    def _tag(self, rid: int) -> str:
+        return f"akış {rid & 0xFFFF:04x}"
+
     # --- realm yönetimi -------------------------------------------------
     def open_realm(self, port: int) -> int:
         rid = random.randint(1, 0xFFFFFFFF)
         self._realms[rid] = asyncio.Queue()
+        self._log(f"[PTCP] {self._tag(rid)} açılıyor (port {port}; açık: "
+                  f"{len(self._realms)}, bekleyen paket: {self.pending})")
         self._queue_send.put_nowait(
             PtcpPacketBodyBind(PtcpRealmIdentifier(rid), port))
         return rid
@@ -182,6 +225,10 @@ class MuxPtcp(PtcpSocket):
         if rid in self._remote_closed:
             self._remote_closed.discard(rid)
             return
+        if os.environ.get("NVRIZLEME_NO_DISC"):
+            self._log(f"[PTCP] {self._tag(rid)} kapatıldı (cihaza bildirilmedi)")
+            return
+        self._log(f"[PTCP] {self._tag(rid)} kapatıldı, cihaza bildirildi")
         self._queue_send.put_nowait(
             RawBody(struct.pack("!B3xLL", 0x12, rid, 0) + b"DISC"))
 
@@ -235,9 +282,13 @@ class MuxPtcp(PtcpSocket):
             return
         if raw[:1] == b"\x12":
             rid = _realm_of(raw)
-            if b"DISC" in raw and rid in self._realms:
+            known = rid in self._realms
+            if b"DISC" in raw and known:
                 self._remote_closed.add(rid)
                 self._realms[rid].put_nowait(None)
+            word = "CONN" if b"CONN" in raw else "DISC" if b"DISC" in raw else "?"
+            self._log(f"[PTCP] {self._tag(rid or 0)} cihaz yanıtı: {word}"
+                      f"{'' if known else ' (kapanmış akış)'}")
 
 
 class P2PSession:
