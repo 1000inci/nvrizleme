@@ -73,7 +73,7 @@ class VideoTile(QFrame):
         self._args = None
         self._started = 0.0
         self._retry_at = 0.0
-        self._retry_delay = 5
+        self._retry_delay = 10
         self._base_title = ""
 
         self.title = QLabel("")
@@ -110,17 +110,28 @@ class VideoTile(QFrame):
         self.double_clicked.emit(self.index)
 
     # --- oynatma --------------------------------------------------------
-    def play(self, url: str, user: str, password: str, title: str) -> None:
+    def play(self, url: str, user: str, password: str, title: str,
+             delay: float = 0.0) -> bool:
+        """Oynatmayı başlatır. Yeni bir akış başlatıldıysa True döner.
+
+        delay: akışın kaç saniye sonra açılacağı. Karolar aynı anda değil
+        sırayla açılsın diye kullanılır (cihaza ani yük bindirmemek için).
+        """
         key = (url, user, password)
         if key == self._key:
             self._base_title = title
-            return
+            return False
         self.stop()
         self._base_title = title
         self._key = key
         self._args = (url, user, password)
-        self._retry_delay = 5
-        self._start()
+        self._retry_delay = 10
+        if delay > 0:
+            self._retry_at = time.monotonic() + delay
+            self.title.setText(f"{title} - sırada…")
+        else:
+            self._start()
+        return True
 
     def _start(self) -> None:
         url, user, password = self._args
@@ -188,7 +199,7 @@ class VideoTile(QFrame):
         if state == vlc.State.Playing:
             self.title.setText(self._base_title)
             if now - self._started > 30:
-                self._retry_delay = 5
+                self._retry_delay = 10
             return
         failed = state in (vlc.State.Error, vlc.State.Ended, vlc.State.Stopped)
         stuck = now - self._started > 25      # hâlâ görüntü yok
@@ -198,7 +209,7 @@ class VideoTile(QFrame):
             self._retry_at = now + self._retry_delay
             self.title.setText(f"{self._base_title} - görüntü yok ({state_name}), "
                                f"{self._retry_delay} sn sonra yeniden denenecek")
-            self._retry_delay = min(self._retry_delay * 2, 60)
+            self._retry_delay = min(self._retry_delay * 2, 120)
         else:
             self.title.setText(f"{self._base_title} - bağlanıyor… ({state_name})")
 
@@ -376,7 +387,7 @@ class MainWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
-        self.timer.start(2000)
+        self.timer.start(500)
 
         self.rebuild_tree()
         self.apply_layout()
@@ -657,6 +668,7 @@ class MainWindow(QMainWindow):
         """Görünen karoları oynatma listesiyle eşitler."""
         entries = self.visible_entries()
         main = len(entries) == 1
+        started = 0
         for i, tile in enumerate(self.tiles):
             entry = entries[i] if i < len(entries) else None
             dev = self.device(entry.device_id) if entry else None
@@ -674,7 +686,8 @@ class MainWindow(QMainWindow):
                 continue
             url = rtsp.live_url(link.host, entry.channel,
                                 rtsp.MAIN if main else rtsp.SUB, link.port)
-            tile.play(url, dev.user, link.password, title)
+            if tile.play(url, dev.user, link.password, title, delay=started * 0.5):
+                started += 1
         if self.zoom_entry is not None:
             self.page_label.setText(" tek kanal ")
         else:

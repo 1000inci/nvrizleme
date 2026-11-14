@@ -34,6 +34,7 @@ def test_app_smoke(tmp_path, monkeypatch):
     assert not win.tiles[1].isVisibleTo(win.grid_host)
     win.toggle_zoom(0)
     assert win.tiles[3]._args[0].endswith("channel=4&subtype=1")
+    assert win.tiles[0]._retry_at == 0 and win.tiles[3]._retry_at > 0   # sırayla açılır
 
     win.on_lost(dev.id)                           # tünel koptu
     assert win.tiles[0]._args is None

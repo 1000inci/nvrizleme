@@ -67,7 +67,7 @@ class LinkManager:
     async def _run_p2p(self, dev: Device, password: str) -> None:
         b = self.bridge
         tag = f"[{dev.name}] "
-        delay = 5
+        delay = 30
         ever_connected = False
         while True:
             s = P2PSession(dev.serial, dev.user, password,
@@ -88,7 +88,7 @@ class LinkManager:
                 except P2PError as e:
                     b.log.emit(tag + f"Kanal adları okunamadı: {e}")
                 ever_connected = True
-                delay = 5
+                delay = 30
                 b.connected.emit(dev.id, "127.0.0.1", port, names)
                 while s.alive:
                     await asyncio.sleep(2)
@@ -115,7 +115,7 @@ class LinkManager:
                     pass
             b.status.emit(dev.id, f"{delay} sn sonra yeniden bağlanacak…")
             await asyncio.sleep(delay)
-            delay = min(delay * 2, 60)
+            delay = min(delay * 2, 300)
 
     # --- doğrudan IP ----------------------------------------------------
     async def _run_ip(self, dev: Device, password: str) -> None:

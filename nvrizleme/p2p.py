@@ -51,6 +51,7 @@ Log = Callable[[str], None]
 
 CHUNK = 1024            # tek PTCP paketine konan en fazla veri (sınır 1280)
 HTTP_TIMEOUT = 15
+RETRY_GAP = 8          # tünel denemeleri arası bekleme (sn); cihazı yormamak için
 
 
 class P2PError(Exception):
@@ -298,8 +299,8 @@ class _repeat_first_packet:
     kolayca kaybolur ya da karşı tarafın NAT kaydı henüz açılmamış olur;
     bu yüzden bağlantı çoğu denemede kurulamıyordu.
     """
-    INTERVAL = 0.3
-    COUNT = 10
+    INTERVAL = 0.5
+    COUNT = 5
 
     def __init__(self, udp) -> None:
         self._udp = udp
@@ -385,7 +386,7 @@ class P2PSession:
         self.log(f"Cihazın bildirdiği portlar: HTTP {self.http_port}, "
                  f"RTSP {self.rtsp_port}")
 
-    async def open_tunnel(self, attempts: int = 5) -> None:
+    async def open_tunnel(self, attempts: int = 3) -> None:
         """Şifreyle kimlik doğrular, UDP delik açma ile tüneli kurar."""
         if self._salt is None:
             await self.check_online()
@@ -402,7 +403,7 @@ class P2PSession:
             except (asyncio.TimeoutError, TimeoutError):
                 self.log("Sunucu kanal isteğine yanıt vermedi.")
                 if attempt < attempts:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(RETRY_GAP)
                 continue
             self.log("Kanal açıldı (şifre kabul edildi). Cihaz adresi: "
                      f"dış {udp.get_address_remote().get_address_string()}, "
@@ -423,7 +424,7 @@ class P2PSession:
                 self.log("Cihazdan ilk yanıt GELDİ ama el sıkışma yarıda kaldı.")
                 udp.close()
             if attempt < attempts:
-                await asyncio.sleep(3)
+                await asyncio.sleep(RETRY_GAP)
         if base is None:
             raise P2PError(
                 f"{attempts} denemede P2P tüneli kurulamadı. Günlükteki "
