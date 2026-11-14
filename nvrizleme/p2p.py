@@ -291,6 +291,42 @@ class MuxPtcp(PtcpSocket):
                       f"{'' if known else ' (kapanmış akış)'}")
 
 
+class _repeat_first_packet:
+    """İlk el sıkışma paketini yanıt gelene kadar aralıklarla yeniden yollar.
+
+    OpenDahua ilk paketi tek kez gönderip 1 sn bekler. UDP'de tek paket
+    kolayca kaybolur ya da karşı tarafın NAT kaydı henüz açılmamış olur;
+    bu yüzden bağlantı çoğu denemede kurulamıyordu.
+    """
+    INTERVAL = 0.3
+    COUNT = 10
+
+    def __init__(self, udp) -> None:
+        self._udp = udp
+        self._task: asyncio.Task | None = None
+        self._original_send = udp.send
+        udp.send = self._send
+
+    def _send(self, data: bytes) -> None:
+        self._original_send(data)
+        if self._task is None:              # ilk paket
+            self._task = asyncio.create_task(self._repeat(data))
+        else:                               # el sıkışma ilerledi
+            self._task.cancel()
+
+    async def _repeat(self, data: bytes) -> None:
+        for _ in range(self.COUNT):
+            await asyncio.sleep(self.INTERVAL)
+            if self._udp._protocol.queue_receive.qsize():
+                return                      # yanıt geldi
+            self._original_send(data)
+
+    def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+        self._udp.send = self._original_send
+
+
 class P2PSession:
     """Bir NVR ile P2P oturumu. Tüm yöntemler aynı asyncio döngüsünde çağrılmalı."""
 
@@ -372,13 +408,18 @@ class P2PSession:
                      f"dış {udp.get_address_remote().get_address_string()}, "
                      f"iç {local.get_address_string()}")
             self.log("Cihaza doğrudan UDP bağlantısı deneniyor...")
+            repeater = _repeat_first_packet(udp)
+            sig.TIME_NUMBER_OF_SECOND_TIMEOUT_HANDSHAKE = 4
             try:
                 base = await sig._determine_ptcp_socket_device(udp, local)
+                repeater.stop()
                 break
             except DahuaPeerToPeerConnectionError:
+                repeater.stop()
                 self.log("Cihazdan hiç yanıt gelmedi.")
                 udp.close()
             except (asyncio.TimeoutError, TimeoutError):
+                repeater.stop()
                 self.log("Cihazdan ilk yanıt GELDİ ama el sıkışma yarıda kaldı.")
                 udp.close()
             if attempt < attempts:
