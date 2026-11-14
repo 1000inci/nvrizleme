@@ -22,6 +22,9 @@ import struct
 from typing import Callable
 
 from . import _compat  # noqa: F401  (opendahua'yı Python < 3.14'te çalıştırır)
+from opendahua.api_peer_to_peer.api_peer_to_peer_authentication_util import (
+    ApiPeerToPeerAuthenticationUtil,
+)
 from opendahua.api_peer_to_peer.request.api_peer_to_peer_encryption_util import (
     ApiPeerToPeerEncryptionUtil,
 )
@@ -104,13 +107,31 @@ _original_decrypt_info = ApiPeerToPeerEncryptionUtil.decrypt_device_info.__func_
 
 
 def _capturing_decrypt_info(cls, device_info_encrypted: str) -> dict:
-    info = _original_decrypt_info(cls, device_info_encrypted)
+    if not device_info_encrypted:
+        # Eski yazılımlar bilgi vermez (<Info/> boş gelir): tuz yoktur.
+        info = {"randsalt": ""}
+    else:
+        info = _original_decrypt_info(cls, device_info_encrypted)
     _last_device_info.clear()
     _last_device_info.update(info)
     return info
 
 
 ApiPeerToPeerEncryptionUtil.decrypt_device_info = classmethod(_capturing_decrypt_info)
+
+
+# Tuz bildirmeyen cihazlar kimlik gövdesinde <RandSalt> öğesini boş değil,
+# hiç görmek ister.
+_original_auth_body = ApiPeerToPeerAuthenticationUtil.generate_part_body_authentication.__func__
+
+
+def _auth_body_without_empty_salt(cls, *args, **kwargs) -> str:
+    body = _original_auth_body(cls, *args, **kwargs)
+    return body.replace("<RandSalt></RandSalt>", "")
+
+
+ApiPeerToPeerAuthenticationUtil.generate_part_body_authentication = classmethod(
+    _auth_body_without_empty_salt)
 
 
 def _realm_of(raw: bytes) -> int | None:
@@ -284,9 +305,10 @@ class P2PSession:
                     "P2P kanalı açılamadı. Kullanıcı adı / şifre hatalı "
                     f"olabilir; tekrar denemeden önce kontrol edin. ({e})")
             except (asyncio.TimeoutError, TimeoutError):
-                raise P2PError(
-                    "Sunucu kanal isteğine yanıt vermedi (cihaz sunucuya "
-                    "yanıt vermiyor olabilir). Biraz sonra tekrar deneyin.")
+                self.log("Sunucu kanal isteğine yanıt vermedi.")
+                if attempt < attempts:
+                    await asyncio.sleep(3)
+                continue
             self.log("Kanal açıldı (şifre kabul edildi). Cihaz adresi: "
                      f"dış {udp.get_address_remote().get_address_string()}, "
                      f"iç {local.get_address_string()}")
@@ -304,10 +326,10 @@ class P2PSession:
                 await asyncio.sleep(3)
         if base is None:
             raise P2PError(
-                "Cihazla doğrudan UDP bağlantısı kurulamadı. Yukarıdaki "
-                "satırlar hangi aşamada kalındığını gösterir. 'Hiç yanıt "
-                "gelmedi' ise arada bağlantıyı engelleyen bir güvenlik "
-                "duvarı / NAT vardır.")
+                f"{attempts} denemede P2P tüneli kurulamadı. Günlükteki "
+                "satırlar hangi aşamada kalındığını gösterir. Hep 'cihazdan "
+                "hiç yanıt gelmedi' ise arada doğrudan bağlantıyı engelleyen "
+                "bir güvenlik duvarı / NAT vardır.")
         self.ptcp = MuxPtcp(base._udp_socket, self.log)
         await self.ptcp.connect()
         self.log("P2P tüneli kuruldu.")
