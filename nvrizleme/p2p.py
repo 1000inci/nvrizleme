@@ -146,6 +146,7 @@ class MuxPtcp(PtcpSocket):
     def __init__(self, udp_socket, log: Log = lambda s: None) -> None:
         super().__init__(udp_socket)
         self._realms: dict[int, asyncio.Queue] = {}
+        self._remote_closed: set[int] = set()
         self._log = log
         self.on_control: Callable[[bytes], None] | None = None
         self.last_rx = 0.0
@@ -175,7 +176,14 @@ class MuxPtcp(PtcpSocket):
         return await asyncio.wait_for(q.get(), timeout)
 
     def close_realm(self, rid: int) -> None:
-        self._realms.pop(rid, None)
+        """Bağlantıyı kapatır ve cihaza bildirir (cihazda açık oturum kalmasın)."""
+        if self._realms.pop(rid, None) is None:
+            return
+        if rid in self._remote_closed:
+            self._remote_closed.discard(rid)
+            return
+        self._queue_send.put_nowait(
+            RawBody(struct.pack("!B3xLL", 0x12, rid, 0) + b"DISC"))
 
     @property
     def pending(self) -> int:
@@ -228,8 +236,8 @@ class MuxPtcp(PtcpSocket):
         if raw[:1] == b"\x12":
             rid = _realm_of(raw)
             if b"DISC" in raw and rid in self._realms:
+                self._remote_closed.add(rid)
                 self._realms[rid].put_nowait(None)
-            self._log(f"[PTCP] durum paketi: {raw[8:].decode('ascii', 'replace')!r}")
 
 
 class P2PSession:

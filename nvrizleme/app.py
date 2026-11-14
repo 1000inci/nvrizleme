@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
@@ -129,7 +130,11 @@ class VideoTile(QFrame):
             self.title.setText(f"{self._base_title} - VLC bulunamadı")
             return
         self.title.setText(f"{self._base_title} - bağlanıyor…")
-        media = self._instance.media_new(url)
+        # Kimlik bilgisi hem adreste hem seçenek olarak verilir; gömülü VLC
+        # şifre penceresi açamadığı için ikisinden biri mutlaka işlemeli.
+        auth_url = url.replace(
+            "rtsp://", f"rtsp://{quote(user, safe='')}:{quote(password, safe='')}@", 1)
+        media = self._instance.media_new(auth_url)
         media.add_option(":rtsp-tcp")
         media.add_option(":network-caching=400")
         media.add_option(f":rtsp-user={user}")
@@ -187,12 +192,15 @@ class VideoTile(QFrame):
             return
         failed = state in (vlc.State.Error, vlc.State.Ended, vlc.State.Stopped)
         stuck = now - self._started > 25      # hâlâ görüntü yok
+        state_name = str(state).split(".")[-1]
         if failed or stuck:
             self._release_player()
             self._retry_at = now + self._retry_delay
-            self.title.setText(f"{self._base_title} - görüntü yok, "
+            self.title.setText(f"{self._base_title} - görüntü yok ({state_name}), "
                                f"{self._retry_delay} sn sonra yeniden denenecek")
             self._retry_delay = min(self._retry_delay * 2, 60)
+        else:
+            self.title.setText(f"{self._base_title} - bağlanıyor… ({state_name})")
 
 
 class DeviceDialog(QDialog):
@@ -494,6 +502,10 @@ class MainWindow(QMainWindow):
         if device_id in self.links:
             self.show_device(device_id)
             return
+        if "bağlan" in self.status.get(device_id, "") and \
+                self.status.get(device_id) != "bağlı":
+            self.show_after_connect = device_id
+            return                      # zaten bağlanıyor; ikinci kez başlatma
         password = store.get_password(dev.id) or self.session_pw.get(dev.id)
         if not password:
             password, ok = QInputDialog.getText(
