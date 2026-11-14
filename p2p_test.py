@@ -125,11 +125,16 @@ def main() -> int:
         finally:
             await s.close()
 
+    # Windows'un varsayılan (Proactor) döngüsü UDP'de sorunlu; Selector kullan.
+    loop = (asyncio.SelectorEventLoop() if sys.platform == "win32"
+            else asyncio.new_event_loop())
     try:
-        return asyncio.run(run())
+        return loop.run_until_complete(run())
     except KeyboardInterrupt:
         print("\nKapatıldı.")
         return 0
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":

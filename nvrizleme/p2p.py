@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import socket
 import struct
 from typing import Callable
 
@@ -189,7 +190,14 @@ class P2PSession:
     async def check_online(self) -> None:
         """Şifre gerektirmez: Easy4IP sunucusuna ulaşır ve cihazı sorar."""
         try:
-            self.log("Easy4IP sunucusuna bağlanılıyor (UDP 8800)...")
+            # Windows'ta UDP gönderimi alan adı kabul etmez; önce IP'ye çevir.
+            host = SignalingClient.MAIN_REMOTE_HOST
+            infos = await asyncio.get_running_loop().getaddrinfo(
+                host, SignalingClient.MAIN_REMOTE_PORT,
+                family=socket.AF_INET, type=socket.SOCK_DGRAM)
+            self._signaling.MAIN_REMOTE_HOST = infos[0][4][0]
+            self.log(f"Easy4IP sunucusuna bağlanılıyor: {host} "
+                     f"({infos[0][4][0]}, UDP 8800)...")
             main = await asyncio.wait_for(self._signaling._probe(), 15)
         except (asyncio.TimeoutError, TimeoutError):
             raise P2PError(
