@@ -20,6 +20,17 @@ from nvrizleme import rtsp
 from nvrizleme.dahua import AuthError, DahuaClient, DahuaError
 
 
+def _print_info(info) -> None:
+    print(f"  Model: {info.model}   Seri no: {info.serial}")
+    print(f"  Kanal sayısı: {len(info.channels)}")
+    known = [c for c in info.channels if c.online is not None]
+    if known:
+        print(f"  Bağlı kamera: {sum(1 for c in known if c.online)}")
+    for c in info.channels:
+        durum = {True: "bağlı", False: "bağlı değil", None: ""}[c.online]
+        print(f"    {c.number:>3}: {c.name}  {durum}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Dahua NVR doğrudan bağlantı testi")
     ap.add_argument("adres", help="NVR IP adresi veya alan adı")
@@ -42,16 +53,13 @@ def main() -> int:
         print(f"  HATA - {e}")
         return 2
     except DahuaError as e:
-        print(f"  HATA - {e}")
-        return 1
-    print(f"  Model: {info.model}   Seri no: {info.serial}")
-    print(f"  Kanal sayısı: {len(info.channels)}")
-    known = [c for c in info.channels if c.online is not None]
-    if known:
-        print(f"  Bağlı kamera: {sum(1 for c in known if c.online)}")
-    for c in info.channels:
-        durum = {True: "bağlı", False: "bağlı değil", None: ""}[c.online]
-        print(f"    {c.number:>3}: {c.name}  {durum}")
+        print(f"  UYARI - {e}")
+        print("  Cihaz bilgisi okunamadı. NVR'da CGI servisi kapalı olabilir "
+              "(Sistem > Güvenlik > Sistem Servisi > CGI).\n"
+              "  RTSP testi yine de denenecek.")
+        info = None
+    if info is not None:
+        _print_info(info)
 
     channel = a.izle or 1
     subtype = rtsp.MAIN if a.ana else rtsp.SUB

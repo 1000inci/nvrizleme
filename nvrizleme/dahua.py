@@ -165,19 +165,26 @@ class DahuaClient:
     def fetch_info(self) -> DeviceInfo:
         """Cihaz bilgisi + kanal listesi. İlk çağrı aynı zamanda giriş testidir."""
         info = DeviceInfo()
-        info.model = self.device_type()           # 401 ise burada durur
+        # İlk çağrı giriş testidir; 401 ise burada durur (AuthError).
+        # Bazı modeller getDeviceType'ı desteklemez (404); getSystemInfo denenir.
         try:
-            info.serial = self.serial()
+            sysinfo = self.get_kv("/cgi-bin/magicBox.cgi?action=getSystemInfo")
+            info.model = sysinfo.get("deviceType", "")
+            info.serial = sysinfo.get("serialNumber", "")
         except AuthError:
             raise
         except DahuaError:
             pass
-        try:
-            info.version = self.software_version()
-        except AuthError:
-            raise
-        except DahuaError:
-            pass
+        for attr, call in (("model", self.device_type), ("serial", self.serial),
+                           ("version", self.software_version)):
+            if getattr(info, attr):
+                continue
+            try:
+                setattr(info, attr, call())
+            except AuthError:
+                raise
+            except DahuaError:
+                pass
         info.channels = self.channels()
         states = self.camera_states()
         for ch in info.channels:
