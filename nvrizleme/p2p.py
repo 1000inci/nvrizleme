@@ -36,6 +36,7 @@ from opendahua.ptcp.ptcp_packet_parser import PtcpPacketParser
 from opendahua.ptcp.ptcp_realm_identifier import PtcpRealmIdentifier
 from opendahua.ptcp.ptcp_socket import PtcpSocket
 from opendahua.signaling_client import SignalingClient
+from opendahua.udp.udp_protocol import UdpProtocol
 
 from .rtsp import digest_header
 
@@ -71,6 +72,21 @@ def _tolerant_parse(cls, body_bytes: bytes) -> PtcpPacketBody:
 
 PtcpPacketBodyParser.parse = classmethod(_tolerant_parse)
 _body_parser_mod.PtcpPacketBodyParser = PtcpPacketBodyParser
+
+
+# Windows, UDP'de "port ulaşılamaz" (ICMP) yanıtını bir sonraki okumada
+# WinError 10054 olarak bildirir. Delik açma sırasında ilk paketlerin
+# reddedilmesi olağandır; bu hatayı yok sayıp beklemeye devam ediyoruz.
+_original_error_received = UdpProtocol.error_received
+
+
+def _tolerant_error_received(self, exc: Exception) -> None:
+    if isinstance(exc, ConnectionResetError):
+        return
+    _original_error_received(self, exc)
+
+
+UdpProtocol.error_received = _tolerant_error_received
 
 
 def _realm_of(raw: bytes) -> int | None:
